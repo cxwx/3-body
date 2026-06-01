@@ -52,6 +52,10 @@ class ThreeBodySystem {
   sf::Vector2f velocityStart;
   float zoom = 1.0F;  // 缩放系数，默认为1.0
   bool isPaused{};   // 暂停状态
+  int selectedBodyForEdit{-1};  // 选中的天体用于编辑（-1表示无选中）
+  string editingText;  // 当前编辑的文本
+  bool isEditingVelocityX{}, isEditingVelocityY{}, isEditingMass{};  // 编辑状态
+  sf::Vector2f panOffset{};  // 平移偏移量
 
   // 按钮区域定义
   struct Button {
@@ -224,23 +228,23 @@ class ThreeBodySystem {
     sf::Vector2f center(simWidth / 2.0F, window.getSize().y / 2.0F);
 
     for (auto &body : bodies) {
-      // 绘制轨迹（应用缩放）
+      // 绘制轨迹（应用缩放和平移）
       if (body.trail.size() > 1) {
         for (size_t i = 1; i < body.trail.size(); i++) {
           sf::Vertex line[2];
           sf::Vector2f relPos1 = body.trail[i - 1] - center;
           sf::Vector2f relPos2 = body.trail[i] - center;
-          line[0].position = center + relPos1 * zoom;
+          line[0].position = center + relPos1 * zoom + panOffset;
           line[0].color = body.color;
-          line[1].position = center + relPos2 * zoom;
+          line[1].position = center + relPos2 * zoom + panOffset;
           line[1].color = body.color;
           window.draw(line, 2, sf::PrimitiveType::Lines);
         }
       }
 
-      // 绘制天体（应用缩放）
+      // 绘制天体（应用缩放和平移）
       sf::Vector2f relPos = body.position - center;
-      sf::Vector2f scaledPos = center + relPos * zoom;
+      sf::Vector2f scaledPos = center + relPos * zoom + panOffset;
 
       sf::CircleShape circle(body.radius * zoom);
       circle.setPosition(sf::Vector2f(scaledPos.x - (body.radius * zoom), scaledPos.y - (body.radius * zoom)));
@@ -254,9 +258,9 @@ class ThreeBodySystem {
         sf::Vertex line[2];
         sf::Vector2f relPos1 = bodies[currentBody - 1].position - center;
         sf::Vector2f relPos2 = velocityStart - center;
-        line[0].position = center + relPos1 * zoom;
+        line[0].position = center + relPos1 * zoom + panOffset;
         line[0].color = sf::Color::White;
-        line[1].position = center + relPos2 * zoom;
+        line[1].position = center + relPos2 * zoom + panOffset;
         line[1].color = sf::Color::Yellow;
         window.draw(line, 2, sf::PrimitiveType::Lines);
       }
@@ -275,9 +279,82 @@ class ThreeBodySystem {
     panelBg.setFillColor(sf::Color(40, 40, 50));
     window.draw(panelBg);
 
-    // 绘制按钮
+    // 加载字体
+    sf::Font font;
+    if (!font.openFromFile("/System/Library/Fonts/Helvetica.ttc")) {
+      return;
+    }
+
+    // 绘制控制按钮
     drawButton(window, panelX + 20, 50, 160, 40, isPaused ? "Resume" : "Pause", isPaused);
     drawButton(window, panelX + 20, 120, 160, 40, "Reset", false);
+
+    // 绘制天体信息
+    float yPos = 200;
+    for (size_t i = 0; i < bodies.size(); i++) {
+      const auto &body = bodies[i];
+
+      // 天体编号和颜色
+      sf::Text bodyLabel(font, "Body " + to_string(i + 1), 14);
+      bodyLabel.setFillColor(body.color);
+      bodyLabel.setPosition(sf::Vector2f(panelX + 10, yPos));
+      window.draw(bodyLabel);
+      yPos += 25;
+
+      // 速度X
+      drawEditableField(window, font, panelX + 10, yPos, "Vx:",
+                       to_string(body.velocity.x), i == selectedBodyForEdit && isEditingVelocityX,
+                       selectedBodyForEdit == static_cast<int>(i) && !isEditingVelocityX && !isEditingVelocityY && !isEditingMass);
+      yPos += 25;
+
+      // 速度Y
+      drawEditableField(window, font, panelX + 10, yPos, "Vy:",
+                       to_string(body.velocity.y), i == selectedBodyForEdit && isEditingVelocityY,
+                       selectedBodyForEdit == static_cast<int>(i) && !isEditingVelocityX && !isEditingVelocityY && !isEditingMass);
+      yPos += 25;
+
+      // 总速度
+      float totalSpeed = sqrt(body.velocity.x * body.velocity.x + body.velocity.y * body.velocity.y);
+      sf::Text speedLabel(font, "|V|: " + to_string(totalSpeed), 12);
+      speedLabel.setFillColor(sf::Color(180, 180, 180));
+      speedLabel.setPosition(sf::Vector2f(panelX + 10, yPos));
+      window.draw(speedLabel);
+      yPos += 25;
+
+      // 质量
+      drawEditableField(window, font, panelX + 10, yPos, "Mass:",
+                       to_string(body.mass), i == selectedBodyForEdit && isEditingMass,
+                       selectedBodyForEdit == static_cast<int>(i) && !isEditingVelocityX && !isEditingVelocityY && !isEditingMass);
+      yPos += 35;
+    }
+  }
+
+  void drawEditableField(sf::RenderWindow &window, sf::Font &font, float x, float y,
+                        const string &label, const string &value, bool isEditing, bool isSelected) {
+    // 标签
+    sf::Text labelText(font, label, 12);
+    labelText.setFillColor(sf::Color(150, 150, 170));
+    labelText.setPosition(sf::Vector2f(x, y));
+    window.draw(labelText);
+
+    // 值背景
+    sf::RectangleShape valueBg(sf::Vector2f(120, 18));
+    valueBg.setPosition(sf::Vector2f(x + 40, y - 2));
+    if (isEditing) {
+      valueBg.setFillColor(sf::Color(60, 80, 60));
+    } else if (isSelected) {
+      valueBg.setFillColor(sf::Color(60, 60, 80));
+    } else {
+      valueBg.setFillColor(sf::Color(30, 30, 40));
+    }
+    window.draw(valueBg);
+
+    // 值文本
+    string displayValue = isEditing ? editingText : value;
+    sf::Text valueText(font, displayValue, 12);
+    valueText.setFillColor(isEditing ? sf::Color(100, 255, 100) : sf::Color(200, 200, 200));
+    valueText.setPosition(sf::Vector2f(x + 45, y - 1));
+    window.draw(valueText);
   }
 
   void drawButton(sf::RenderWindow &window, float x, float y, float width, float height, const string &label, bool isActive) {
@@ -332,9 +409,52 @@ class ThreeBodySystem {
     return center + relPos / zoom;
   }
 
-  // 检查是否点击了控制面板按钮
+  // 检查是否点击了控制面板按钮或字段
   bool handleControlPanelClick(sf::Vector2i mousePos, sf::RenderWindow &window) {
     float panelX = window.getSize().x - CONTROL_PANEL_WIDTH;
+
+    // 检查是否点击了天体信息字段
+    float yPos = 200;
+    for (size_t i = 0; i < bodies.size(); i++) {
+      // 天体编号（不处理点击）
+      yPos += 25;
+
+      // 速度X字段
+      if (mousePos.x >= panelX + 50 && mousePos.x <= panelX + 170 && mousePos.y >= yPos && mousePos.y <= yPos + 18) {
+        selectedBodyForEdit = static_cast<int>(i);
+        isEditingVelocityX = true;
+        isEditingVelocityY = false;
+        isEditingMass = false;
+        editingText = to_string(bodies[i].velocity.x);
+        return true;
+      }
+      yPos += 25;
+
+      // 速度Y字段
+      if (mousePos.x >= panelX + 50 && mousePos.x <= panelX + 170 && mousePos.y >= yPos && mousePos.y <= yPos + 18) {
+        selectedBodyForEdit = static_cast<int>(i);
+        isEditingVelocityX = false;
+        isEditingVelocityY = true;
+        isEditingMass = false;
+        editingText = to_string(bodies[i].velocity.y);
+        return true;
+      }
+      yPos += 25;
+
+      // 总速度（不处理点击）
+      yPos += 25;
+
+      // 质量字段
+      if (mousePos.x >= panelX + 50 && mousePos.x <= panelX + 170 && mousePos.y >= yPos && mousePos.y <= yPos + 18) {
+        selectedBodyForEdit = static_cast<int>(i);
+        isEditingVelocityX = false;
+        isEditingVelocityY = false;
+        isEditingMass = true;
+        editingText = to_string(bodies[i].mass);
+        return true;
+      }
+      yPos += 35;
+    }
 
     // 暂停按钮
     if (mousePos.x >= panelX + 20 && mousePos.x <= panelX + 180 && mousePos.y >= 50 && mousePos.y <= 90) {
@@ -349,6 +469,110 @@ class ThreeBodySystem {
     }
 
     return false;
+  }
+
+  // 处理文本输入
+  void handleTextInput(uint32_t unicode) {
+    if (selectedBodyForEdit < 0 || selectedBodyForEdit >= static_cast<int>(bodies.size())) {
+      return;
+    }
+
+    // 处理数字、小数点、负号
+    if ((unicode >= '0' && unicode <= '9') || unicode == '.' || unicode == '-' || unicode == 8 || unicode == 127) {
+      // 8 = Backspace, 127 = Delete
+      if (unicode == 8) {  // Backspace
+        if (!editingText.empty()) {
+          editingText.pop_back();
+        }
+      } else if (unicode == 127) {  // Delete
+        // 暂不处理
+      } else if (unicode == '-') {
+        // 只在开头或e/E后允许负号（科学计数法）
+        if (editingText.empty() || editingText.back() == 'e' || editingText.back() == 'E') {
+          editingText += unicode;
+        }
+      } else if (unicode == '.') {
+        // 防止多个小数点
+        if (editingText.find('.') == string::npos) {
+          editingText += unicode;
+        }
+      } else {
+        editingText += unicode;
+      }
+
+      // 实时更新值
+      updateEditedValue();
+    } else if (unicode == 13) {  // Enter键确认
+      confirmEdit();
+      selectedBodyForEdit = -1;
+      isEditingVelocityX = false;
+      isEditingVelocityY = false;
+      isEditingMass = false;
+      editingText.clear();
+    } else if (unicode == 27) {  // Escape键取消
+      selectedBodyForEdit = -1;
+      isEditingVelocityX = false;
+      isEditingVelocityY = false;
+      isEditingMass = false;
+      editingText.clear();
+    }
+  }
+
+  void updateEditedValue() {
+    if (selectedBodyForEdit < 0 || selectedBodyForEdit >= static_cast<int>(bodies.size())) {
+      return;
+    }
+
+    try {
+      float value = std::stof(editingText);
+      if (isEditingVelocityX) {
+        bodies[selectedBodyForEdit].velocity.x = value;
+      } else if (isEditingVelocityY) {
+        bodies[selectedBodyForEdit].velocity.y = value;
+      } else if (isEditingMass) {
+        bodies[selectedBodyForEdit].mass = value;
+      }
+    } catch (...) {
+      // 忽略解析错误
+    }
+  }
+
+  void confirmEdit() {
+    updateEditedValue();
+  }
+
+  void cancelEdit() {
+    selectedBodyForEdit = -1;
+    isEditingVelocityX = false;
+    isEditingVelocityY = false;
+    isEditingMass = false;
+    editingText.clear();
+  }
+
+  // 处理方向键平移
+  void handlePan(sf::Keyboard::Key key) {
+    const float panSpeed = 20.0F;
+
+    switch (key) {
+      case sf::Keyboard::Key::Left:
+      case sf::Keyboard::Key::A:
+        panOffset.x -= panSpeed;
+        break;
+      case sf::Keyboard::Key::Right:
+      case sf::Keyboard::Key::D:
+        panOffset.x += panSpeed;
+        break;
+      case sf::Keyboard::Key::Up:
+      case sf::Keyboard::Key::W:
+        panOffset.y -= panSpeed;
+        break;
+      case sf::Keyboard::Key::Down:
+      case sf::Keyboard::Key::S:
+        panOffset.y += panSpeed;
+        break;
+      default:
+        break;
+    }
   }
 
   void handleMousePress(sf::Vector2f mousePos) {
@@ -383,6 +607,10 @@ class ThreeBodySystem {
 
   [[nodiscard]] auto isConfiguringMode() const -> bool { return isConfiguring; }
 
+  [[nodiscard]] auto isEditing() const -> bool {
+    return isEditingVelocityX || isEditingVelocityY || isEditingMass;
+  }
+
   void startSimulation() {
     if (bodies.size() == 3) {
       isConfiguring = false;
@@ -409,12 +637,25 @@ auto main() -> int {  // NOLINT
       if (event->is<sf::Event::Closed>()) {
         window.close();
       } else if (const auto *keyPressed = event->getIf<sf::Event::KeyPressed>()) {
-        if (keyPressed->code == sf::Keyboard::Key::Escape) {
-          window.close();
-        } else if (keyPressed->code == sf::Keyboard::Key::R) {
-          system.reset();
-        } else if (keyPressed->code == sf::Keyboard::Key::Enter && system.isConfiguringMode()) {
-          system.startSimulation();
+        // 处理方向键或WASD平移（在非编辑模式下）
+        if (!system.isEditing()) {
+          if (keyPressed->code == sf::Keyboard::Key::Escape) {
+            window.close();
+          } else if (keyPressed->code == sf::Keyboard::Key::R) {
+            system.reset();
+          } else if (keyPressed->code == sf::Keyboard::Key::Enter && system.isConfiguringMode()) {
+            system.startSimulation();
+          } else {
+            // 处理方向键平移
+            system.handlePan(keyPressed->code);
+          }
+        } else {
+          // 编辑模式下只处理Esc确认/取消编辑
+          if (keyPressed->code == sf::Keyboard::Key::Escape) {
+            system.cancelEdit();
+          } else if (keyPressed->code == sf::Keyboard::Key::Enter) {
+            system.confirmEdit();
+          }
         }
       } else if (const auto *mousePressed = event->getIf<sf::Event::MouseButtonPressed>()) {
         if (mousePressed->button == sf::Mouse::Button::Left) {
@@ -443,6 +684,8 @@ auto main() -> int {  // NOLINT
         }
       } else if (const auto *mouseWheel = event->getIf<sf::Event::MouseWheelScrolled>()) {
         system.handleMouseWheel(mouseWheel->delta);
+      } else if (const auto *textEntered = event->getIf<sf::Event::TextEntered>()) {
+        system.handleTextInput(textEntered->unicode);
       }
     }
 
