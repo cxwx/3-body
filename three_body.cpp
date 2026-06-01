@@ -20,8 +20,19 @@ class Body {
   float mass;
   float radius;
   sf::Color color;
+  vector<sf::Vector2f> trail;  // 轨迹
+  static constexpr size_t MAX_TRAIL_LENGTH = 500;  // 最大轨迹长度
 
-  Body(sf::Vector2f pos, float m, float r, sf::Color c) : position(pos), velocity(0, 0), acceleration(0, 0), mass(m), radius(r), color(c) {}
+  Body(sf::Vector2f pos, float m, float r, sf::Color c) : position(pos), velocity(0, 0), acceleration(0, 0), mass(m), radius(r), color(c) {
+    trail.reserve(MAX_TRAIL_LENGTH);
+  }
+
+  void updateTrail() {
+    trail.push_back(position);
+    if (trail.size() > MAX_TRAIL_LENGTH) {
+      trail.erase(trail.begin());
+    }
+  }
 
   void draw(sf::RenderWindow &window) const {
     sf::CircleShape circle(radius);
@@ -39,7 +50,7 @@ class ThreeBodySystem {
   int currentBody{};
   bool settingVelocity{};
   sf::Vector2f velocityStart;
-  float zoom{};  // 缩放系数
+  float zoom = 1.0F;  // 缩放系数，默认为1.0
 
  public:
   ThreeBodySystem() {
@@ -83,6 +94,9 @@ class ThreeBodySystem {
     currentBody = 3;
     isConfiguring = false;
     settingVelocity = false;
+
+    // 修正质心速度，确保系统不动
+    fixCenterOfMassVelocity();
   }
 
   void addBody(sf::Vector2f pos) {
@@ -92,11 +106,61 @@ class ThreeBodySystem {
     bodies.emplace_back(pos, mass, radius, colors[currentBody]);
   }
 
+  // 修正质心速度，确保系统总动量为0
+  void fixCenterOfMassVelocity() {
+    if (bodies.size() < 2) return;
+
+    // 计算质心速度
+    sf::Vector2f totalMomentum(0, 0);
+    float totalMass = 0.0F;
+
+    for (const auto &body : bodies) {
+      totalMomentum += body.velocity * body.mass;
+      totalMass += body.mass;
+    }
+
+    sf::Vector2f centerVelocity = totalMomentum / totalMass;
+
+    // 从每个天体减去质心速度
+    for (auto &body : bodies) {
+      body.velocity -= centerVelocity;
+    }
+  }
+
+  // 修正质心位置到窗口中心
+  void fixCenterOfMassPosition() {
+    if (bodies.size() < 2) return;
+
+    // 计算质心位置
+    sf::Vector2f centerPosition(0, 0);
+    float totalMass = 0.0F;
+
+    for (const auto &body : bodies) {
+      centerPosition += body.position * body.mass;
+      totalMass += body.mass;
+    }
+
+    centerPosition /= totalMass;
+
+    // 将质心移到窗口中心
+    sf::Vector2f windowCenter(800.0F, 600.0F);  // 1600x1200窗口的中心
+    sf::Vector2f offset = windowCenter - centerPosition;
+
+    for (auto &body : bodies) {
+      body.position += offset;
+    }
+  }
+
   void calculateGravity() {
     for (unsigned i = 0; i < bodies.size(); i++) {
       for (unsigned j = i + 1; j < bodies.size(); j++) {
         sf::Vector2f diff = bodies[j].position - bodies[i].position;
         float dist = sqrt((diff.x * diff.x) + (diff.y * diff.y));
+
+        // 避免除零错误
+        if (dist < 0.001F) {
+          continue;  // 距离太近，跳过此对天体的引力计算
+        }
 
         // 使用软化引力公式
         float force = G * bodies[i].mass * bodies[j].mass / (dist * dist + SOFTENING * SOFTENING);
@@ -132,6 +196,11 @@ class ThreeBodySystem {
         // 第四步：完成速度半步更新
         for (auto &body : bodies) { body.velocity += body.acceleration * (dt * 0.5F); }
       }
+
+      // 每帧更新一次轨迹（避免在物理步骤中频繁更新）
+      for (auto &body : bodies) {
+        body.updateTrail();
+      }
     }
   }
 
@@ -140,7 +209,21 @@ class ThreeBodySystem {
     sf::Vector2f center(window.getSize().x / 2.0F, window.getSize().y / 2.0F);
 
     for (auto &body : bodies) {
-      // 手动应用缩放变换
+      // 绘制轨迹（应用缩放）
+      if (body.trail.size() > 1) {
+        for (size_t i = 1; i < body.trail.size(); i++) {
+          sf::Vertex line[2];
+          sf::Vector2f relPos1 = body.trail[i - 1] - center;
+          sf::Vector2f relPos2 = body.trail[i] - center;
+          line[0].position = center + relPos1 * zoom;
+          line[0].color = body.color;
+          line[1].position = center + relPos2 * zoom;
+          line[1].color = body.color;
+          window.draw(line, 2, sf::PrimitiveType::Lines);
+        }
+      }
+
+      // 绘制天体（应用缩放）
       sf::Vector2f relPos = body.position - center;
       sf::Vector2f scaledPos = center + relPos * zoom;
 
@@ -150,6 +233,7 @@ class ThreeBodySystem {
       window.draw(circle);
     }
 
+    // 绘制速度设置线（应用缩放）
     if (settingVelocity && static_cast<std::size_t>(currentBody) > 0 && bodies.size() + 1 >= static_cast<std::size_t>(currentBody)) {
       if (static_cast<std::size_t>(currentBody) - 1 < bodies.size()) {
         sf::Vertex line[2];
@@ -213,6 +297,13 @@ class ThreeBodySystem {
     if (bodies.size() == 3) {
       isConfiguring = false;
       settingVelocity = false;
+      // 修正质心速度和位置，确保系统围绕固定质心运动
+      fixCenterOfMassVelocity();
+      fixCenterOfMassPosition();
+      // 清空轨迹，因为位置被调整了
+      for (auto &body : bodies) {
+        body.trail.clear();
+      }
     }
   }
 };
