@@ -1,0 +1,5 @@
+/.clang-tidy
+/.clangd
+/.claude
+/compile_commands.json
+/harper
