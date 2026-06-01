@@ -21,7 +21,7 @@ class Body {
   float radius;
   sf::Color color;
   vector<sf::Vector2f> trail;  // 轨迹
-  static constexpr size_t MAX_TRAIL_LENGTH = 500;  // 最大轨迹长度
+  static constexpr size_t MAX_TRAIL_LENGTH = 5000;  // 最大轨迹长度（10倍）
 
   Body(sf::Vector2f pos, float m, float r, sf::Color c) : position(pos), velocity(0, 0), acceleration(0, 0), mass(m), radius(r), color(c) {
     trail.reserve(MAX_TRAIL_LENGTH);
@@ -51,8 +51,18 @@ class ThreeBodySystem {
   bool settingVelocity{};
   sf::Vector2f velocityStart;
   float zoom = 1.0F;  // 缩放系数，默认为1.0
+  bool isPaused{};   // 暂停状态
+
+  // 按钮区域定义
+  struct Button {
+    sf::FloatRect rect;
+    string label;
+    bool isHovered{};
+  };
 
  public:
+  static constexpr float CONTROL_PANEL_WIDTH = 200.0F;  // 控制面板宽度
+
   ThreeBodySystem() {
     bodies.clear();
     // 创建稳定的3体配置（正三角形轨道）
@@ -174,6 +184,8 @@ class ThreeBodySystem {
   }
 
   void update(float dt) {
+    if (isPaused) return;  // 暂停时不更新物理
+
     if (!isConfiguring && bodies.size() == 3) {
       // 每帧执行多次物理计算，提高模拟速度同时保持精度
       for (int step = 0; step < PHYSICS_STEPS_PER_FRAME; step++) {
@@ -205,8 +217,11 @@ class ThreeBodySystem {
   }
 
   void draw(sf::RenderWindow &window) {
-    // 计算屏幕中心
-    sf::Vector2f center(window.getSize().x / 2.0F, window.getSize().y / 2.0F);
+    // 绘制模拟区域（左侧）
+    float simWidth = window.getSize().x - CONTROL_PANEL_WIDTH;
+
+    // 计算屏幕中心（基于模拟区域）
+    sf::Vector2f center(simWidth / 2.0F, window.getSize().y / 2.0F);
 
     for (auto &body : bodies) {
       // 绘制轨迹（应用缩放）
@@ -246,6 +261,61 @@ class ThreeBodySystem {
         window.draw(line, 2, sf::PrimitiveType::Lines);
       }
     }
+
+    // 绘制控制面板（右侧）
+    drawControlPanel(window);
+  }
+
+  void drawControlPanel(sf::RenderWindow &window) {
+    float panelX = window.getSize().x - CONTROL_PANEL_WIDTH;
+
+    // 绘制面板背景
+    sf::RectangleShape panelBg(sf::Vector2f(CONTROL_PANEL_WIDTH, window.getSize().y));
+    panelBg.setPosition(sf::Vector2f(panelX, 0));
+    panelBg.setFillColor(sf::Color(40, 40, 50));
+    window.draw(panelBg);
+
+    // 绘制按钮
+    drawButton(window, panelX + 20, 50, 160, 40, isPaused ? "Resume" : "Pause", isPaused);
+    drawButton(window, panelX + 20, 120, 160, 40, "Reset", false);
+  }
+
+  void drawButton(sf::RenderWindow &window, float x, float y, float width, float height, const string &label, bool isActive) {
+    // 检查鼠标悬停
+    sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+    bool isHovered = (mousePos.x >= x && mousePos.x <= x + width && mousePos.y >= y && mousePos.y <= y + height);
+
+    // 绘制按钮背景
+    sf::RectangleShape button(sf::Vector2f(width, height));
+    button.setPosition(sf::Vector2f(x, y));
+
+    if (isActive) {
+      button.setFillColor(sf::Color(100, 200, 100));
+    } else if (isHovered) {
+      button.setFillColor(sf::Color(80, 80, 100));
+    } else {
+      button.setFillColor(sf::Color(60, 60, 80));
+    }
+
+    window.draw(button);
+
+    // 绘制按钮边框
+    sf::RectangleShape border(sf::Vector2f(width - 2, height - 2));
+    border.setPosition(sf::Vector2f(x + 1, y + 1));
+    border.setFillColor(sf::Color::Transparent);
+    border.setOutlineThickness(1);
+    border.setOutlineColor(sf::Color(150, 150, 170));
+    window.draw(border);
+
+    // 绘制文字
+    sf::Font font;
+    if (font.openFromFile("/System/Library/Fonts/Helvetica.ttc")) {
+      sf::Text text(font, label, 16);
+      text.setFillColor(sf::Color::White);
+      // 简单的文字居中
+      text.setPosition(sf::Vector2f(x + 10, y + 10));
+      window.draw(text);
+    }
   }
 
   void handleMouseWheel(float delta) {
@@ -256,9 +326,29 @@ class ThreeBodySystem {
 
   // 将屏幕坐标转换为世界坐标（考虑缩放）
   auto screenToWorld(sf::Vector2i screenPos, sf::RenderWindow &window) const -> sf::Vector2f {
-    sf::Vector2f center(window.getSize().x / 2.0F, window.getSize().y / 2.0F);
+    float simWidth = window.getSize().x - CONTROL_PANEL_WIDTH;
+    sf::Vector2f center(simWidth / 2.0F, window.getSize().y / 2.0F);
     sf::Vector2f relPos = sf::Vector2f(screenPos) - center;
     return center + relPos / zoom;
+  }
+
+  // 检查是否点击了控制面板按钮
+  bool handleControlPanelClick(sf::Vector2i mousePos, sf::RenderWindow &window) {
+    float panelX = window.getSize().x - CONTROL_PANEL_WIDTH;
+
+    // 暂停按钮
+    if (mousePos.x >= panelX + 20 && mousePos.x <= panelX + 180 && mousePos.y >= 50 && mousePos.y <= 90) {
+      isPaused = !isPaused;
+      return true;
+    }
+
+    // 重置按钮
+    if (mousePos.x >= panelX + 20 && mousePos.x <= panelX + 180 && mousePos.y >= 120 && mousePos.y <= 160) {
+      reset();
+      return true;
+    }
+
+    return false;
   }
 
   void handleMousePress(sf::Vector2f mousePos) {
@@ -328,18 +418,28 @@ auto main() -> int {  // NOLINT
         }
       } else if (const auto *mousePressed = event->getIf<sf::Event::MouseButtonPressed>()) {
         if (mousePressed->button == sf::Mouse::Button::Left) {
-          sf::Vector2f mousePos = system.screenToWorld(sf::Vector2i(mousePressed->position), window);
-          system.handleMousePress(mousePos);
+          // 先检查是否点击了控制面板按钮
+          if (!system.handleControlPanelClick(sf::Vector2i(mousePressed->position), window)) {
+            // 如果不是控制面板，则处理模拟区域
+            sf::Vector2f mousePos = system.screenToWorld(sf::Vector2i(mousePressed->position), window);
+            system.handleMousePress(mousePos);
+          }
         }
       } else if (const auto *mouseMoved = event->getIf<sf::Event::MouseMoved>()) {
         if (sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)) {
-          sf::Vector2f mousePos = system.screenToWorld(sf::Vector2i(mouseMoved->position), window);
-          system.handleMouseDrag(mousePos);
+          // 只在模拟区域处理拖拽
+          if (mouseMoved->position.x < window.getSize().x - ThreeBodySystem::CONTROL_PANEL_WIDTH) {
+            sf::Vector2f mousePos = system.screenToWorld(sf::Vector2i(mouseMoved->position), window);
+            system.handleMouseDrag(mousePos);
+          }
         }
       } else if (const auto *mouseReleased = event->getIf<sf::Event::MouseButtonReleased>()) {
         if (mouseReleased->button == sf::Mouse::Button::Left) {
-          sf::Vector2f mousePos = system.screenToWorld(sf::Vector2i(mouseReleased->position), window);
-          system.handleMouseRelease(mousePos);
+          // 只在模拟区域处理释放
+          if (mouseReleased->position.x < window.getSize().x - ThreeBodySystem::CONTROL_PANEL_WIDTH) {
+            sf::Vector2f mousePos = system.screenToWorld(sf::Vector2i(mouseReleased->position), window);
+            system.handleMouseRelease(mousePos);
+          }
         }
       } else if (const auto *mouseWheel = event->getIf<sf::Event::MouseWheelScrolled>()) {
         system.handleMouseWheel(mouseWheel->delta);
