@@ -10,7 +10,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(SFML 3 COMPONENTS Graphics Window System REQUIRED)
 
 # 添加可执行文件
-add_executable(three_body three_body.cpp)
+add_executable(three_body
+    main.cc
+    body.cc
+    three_body_system.cc
+)
 
 # 链接SFML库
 target_link_libraries(three_body PRIVATE
